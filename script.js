@@ -1,5 +1,10 @@
 // Use the HTTPS endpoint from your API
 const API_BASE_URL = 'https://localhost:7247/api/students';
+const AUTH_BASE_URL = 'https://localhost:7247/api/auth';
+
+// Auth state
+let currentUser = null;
+let authToken = null;
 
 // DOM Elements
 const studentForm = document.getElementById('studentForm');
@@ -12,13 +17,31 @@ const editModal = document.getElementById('editModal');
 const closeModal = document.querySelector('.close');
 const cancelEdit = document.getElementById('cancelEdit');
 
+// Auth DOM Elements
+const loginForm = document.getElementById('loginForm');
+const loginFormContainer = document.getElementById('loginFormContainer');
+const userInfo = document.getElementById('userInfo');
+const userDisplayName = document.getElementById('userDisplayName');
+const userRole = document.getElementById('userRole');
+const logoutBtn = document.getElementById('logoutBtn');
+const showRegisterBtn = document.getElementById('showRegister');
+
 // Event Listeners
-document.addEventListener('DOMContentLoaded', loadStudents);
-studentForm.addEventListener('submit', addStudent);
-editStudentForm.addEventListener('submit', updateStudent);
-searchInput.addEventListener('input', filterStudents);
-closeModal.addEventListener('click', closeEditModal);
-cancelEdit.addEventListener('click', closeEditModal);
+document.addEventListener('DOMContentLoaded', function() {
+    checkAuthState();
+    loadStudents();
+});
+
+if (studentForm) studentForm.addEventListener('submit', addStudent);
+if (editStudentForm) editStudentForm.addEventListener('submit', updateStudent);
+if (searchInput) searchInput.addEventListener('input', filterStudents);
+if (closeModal) closeModal.addEventListener('click', closeEditModal);
+if (cancelEdit) cancelEdit.addEventListener('click', closeEditModal);
+
+// Auth Event Listeners
+if (loginForm) loginForm.addEventListener('submit', handleLogin);
+if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+if (showRegisterBtn) showRegisterBtn.addEventListener('click', showRegisterForm);
 
 // Close modal when clicking outside
 window.addEventListener('click', (event) => {
@@ -27,12 +50,215 @@ window.addEventListener('click', (event) => {
     }
 });
 
+// Authentication functions
+async function handleLogin(event) {
+    event.preventDefault();
+    
+    const formData = new FormData(loginForm);
+    const credentials = {
+        username: formData.get('username').trim(),
+        password: formData.get('password')
+    };
+
+    try {
+        const response = await fetch(`${AUTH_BASE_URL}/login`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(credentials)
+        });
+
+        if (!response.ok) {
+            throw new Error('Login failed - check your credentials');
+        }
+
+        const result = await response.json();
+        authToken = result.token;
+        currentUser = {
+            username: result.username,
+            role: result.role
+        };
+
+        // Save to localStorage
+        localStorage.setItem('authToken', authToken);
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+
+        updateAuthUI();
+        loadStudents(); // Reload students to reflect auth state
+        showSuccess('Login successful!');
+        
+    } catch (error) {
+        console.error('Login error:', error);
+        alert('Login failed. Please check your credentials.');
+    }
+}
+
+async function handleRegister(event) {
+    event.preventDefault();
+    
+    const formData = new FormData(document.getElementById('registerForm'));
+    const credentials = {
+        username: formData.get('username').trim(),
+        password: formData.get('password')
+    };
+
+    try {
+        const response = await fetch(`${AUTH_BASE_URL}/register`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(credentials)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText);
+        }
+
+        showSuccess('Registration successful! Please login.');
+        showLoginForm();
+        
+    } catch (error) {
+        console.error('Registration error:', error);
+        alert(`Registration failed: ${error.message}`);
+    }
+}
+
+function handleLogout() {
+    authToken = null;
+    currentUser = null;
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('currentUser');
+    updateAuthUI();
+    loadStudents(); // Reload students to reflect auth state
+    showSuccess('Logged out successfully!');
+}
+
+function checkAuthState() {
+    const savedToken = localStorage.getItem('authToken');
+    const savedUser = localStorage.getItem('currentUser');
+    
+    if (savedToken && savedUser) {
+        authToken = savedToken;
+        currentUser = JSON.parse(savedUser);
+        updateAuthUI();
+    }
+}
+
+function updateAuthUI() {
+    const isAdmin = currentUser && currentUser.role === 'Admin';
+    
+    if (currentUser && authToken) {
+        if (loginFormContainer) loginFormContainer.style.display = 'none';
+        if (userInfo) {
+            userInfo.style.display = 'block';
+            userDisplayName.textContent = currentUser.username;
+            userRole.textContent = currentUser.role;
+        }
+        
+        // Show/hide admin features
+        const adminFeatures = document.querySelectorAll('.admin-only');
+        adminFeatures.forEach(feature => {
+            feature.style.display = isAdmin ? 'block' : 'none';
+        });
+
+        // Update student cards to show/hide action buttons
+        const actionButtons = document.querySelectorAll('.student-actions');
+        actionButtons.forEach(actions => {
+            actions.style.display = isAdmin ? 'flex' : 'none';
+        });
+        
+    } else {
+        if (loginFormContainer) loginFormContainer.style.display = 'block';
+        if (userInfo) userInfo.style.display = 'none';
+        
+        // Hide admin features
+        const adminFeatures = document.querySelectorAll('.admin-only');
+        adminFeatures.forEach(feature => {
+            feature.style.display = 'none';
+        });
+
+        // Hide action buttons in student cards
+        const actionButtons = document.querySelectorAll('.student-actions');
+        actionButtons.forEach(actions => {
+            actions.style.display = 'none';
+        });
+    }
+}
+
+function showRegisterForm() {
+    if (!document.getElementById('registerForm')) {
+        const registerForm = `
+            <div id="registerFormContainer">
+                <h2>Register</h2>
+                <form id="registerForm">
+                    <div class="form-group">
+                        <label for="regUsername">Username:</label>
+                        <input type="text" id="regUsername" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="regPassword">Password:</label>
+                        <input type="password" id="regPassword" name="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Register</button>
+                    <button type="button" class="btn btn-secondary" id="showLogin">Back to Login</button>
+                </form>
+            </div>
+        `;
+        loginFormContainer.innerHTML = registerForm;
+        
+        document.getElementById('registerForm').addEventListener('submit', handleRegister);
+        document.getElementById('showLogin').addEventListener('click', showLoginForm);
+    }
+}
+
+function showLoginForm() {
+    loginFormContainer.innerHTML = `
+        <h2>Login</h2>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Login</button>
+            <button type="button" class="btn btn-secondary" id="showRegister">Register</button>
+        </form>
+    `;
+    
+    document.getElementById('loginForm').addEventListener('submit', handleLogin);
+    document.getElementById('showRegister').addEventListener('click', showRegisterForm);
+}
+
+// Update fetch requests to include auth token
+async function makeAuthenticatedRequest(url, options = {}) {
+    const defaultOptions = {
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    };
+    
+    if (authToken) {
+        defaultOptions.headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    
+    const finalOptions = { ...defaultOptions, ...options };
+    const response = await fetch(url, finalOptions);
+    return response;
+}
+
 // Load all students
 async function loadStudents() {
     try {
         showLoading();
         console.log('🔍 Attempting to fetch students from:', API_BASE_URL);
         
+        // GET requests don't need authentication (AllowAnonymous)
         const response = await fetch(API_BASE_URL);
         console.log('📡 Response status:', response.status);
         
@@ -66,13 +292,15 @@ function displayStudents(students) {
 
     noStudents.style.display = 'none';
     
+    const isAdmin = currentUser && currentUser.role === 'Admin';
+    
     studentsList.innerHTML = students.map(student => `
         <div class="student-card" data-student-id="${student.id}">
             <h3>${escapeHtml(student.name)}</h3>
             <p><strong>Birth Year:</strong> ${student.birthYear}</p>
             <p><strong>Class:</strong> ${escapeHtml(student.class)}</p>
             <p><strong>Created:</strong> ${formatDate(student.createdAt)}</p>
-            <div class="student-actions">
+            <div class="student-actions" style="display: ${isAdmin ? 'flex' : 'none'}">
                 <button class="btn btn-edit" onclick="openEditModal('${student.id}')">Edit</button>
                 <button class="btn btn-danger" onclick="deleteStudent('${student.id}')">Delete</button>
             </div>
@@ -83,6 +311,12 @@ function displayStudents(students) {
 // Add new student
 async function addStudent(event) {
     event.preventDefault();
+    
+    // Check if user is admin
+    if (!currentUser || currentUser.role !== 'Admin') {
+        alert('You need to be an admin to add students. Please login as an admin.');
+        return;
+    }
     
     const formData = new FormData(studentForm);
     const student = {
@@ -105,17 +339,20 @@ async function addStudent(event) {
     try {
         console.log('➕ Adding student:', student);
         
-        const response = await fetch(API_BASE_URL, {
+        const response = await makeAuthenticatedRequest(API_BASE_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
             body: JSON.stringify(student)
         });
 
         console.log('📨 Add student response status:', response.status);
         
         if (!response.ok) {
+            if (response.status === 401) {
+                throw new Error('Unauthorized - Please login again');
+            } else if (response.status === 403) {
+                throw new Error('Forbidden - Admin role required');
+            }
+            
             let errorText = 'Unknown error';
             try {
                 errorText = await response.text();
@@ -135,23 +372,34 @@ async function addStudent(event) {
         showSuccess('Student added successfully!');
     } catch (error) {
         console.error('❌ Error adding student:', error);
-        alert(`Failed to add student: ${error.message}\n\nCheck the browser console for details.`);
+        alert(`Failed to add student: ${error.message}`);
     }
 }
 
 // Delete student
 async function deleteStudent(studentId) {
+    // Check if user is admin
+    if (!currentUser || currentUser.role !== 'Admin') {
+        alert('You need to be an admin to delete students.');
+        return;
+    }
+
     if (!confirm('Are you sure you want to delete this student?')) {
         return;
     }
 
     try {
         console.log('🗑️ Deleting student:', studentId);
-        const response = await fetch(`${API_BASE_URL}/${studentId}`, {
+        const response = await makeAuthenticatedRequest(`${API_BASE_URL}/${studentId}`, {
             method: 'DELETE'
         });
 
         if (!response.ok) {
+            if (response.status === 401) {
+                throw new Error('Unauthorized - Please login again');
+            } else if (response.status === 403) {
+                throw new Error('Forbidden - Admin role required');
+            }
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
@@ -159,12 +407,18 @@ async function deleteStudent(studentId) {
         showSuccess('Student deleted successfully!');
     } catch (error) {
         console.error('Error deleting student:', error);
-        alert('Failed to delete student. Please try again.');
+        alert(`Failed to delete student: ${error.message}`);
     }
 }
 
 // Open edit modal
 async function openEditModal(studentId) {
+    // Check if user is admin
+    if (!currentUser || currentUser.role !== 'Admin') {
+        alert('You need to be an admin to edit students.');
+        return;
+    }
+
     try {
         const response = await fetch(`${API_BASE_URL}/${studentId}`);
         
@@ -190,6 +444,12 @@ async function openEditModal(studentId) {
 async function updateStudent(event) {
     event.preventDefault();
     
+    // Check if user is admin
+    if (!currentUser || currentUser.role !== 'Admin') {
+        alert('You need to be an admin to update students.');
+        return;
+    }
+    
     const studentId = document.getElementById('editId').value;
     const student = {
         name: document.getElementById('editName').value.trim(),
@@ -204,15 +464,17 @@ async function updateStudent(event) {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/${studentId}`, {
+        const response = await makeAuthenticatedRequest(`${API_BASE_URL}/${studentId}`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-            },
             body: JSON.stringify(student)
         });
 
         if (!response.ok) {
+            if (response.status === 401) {
+                throw new Error('Unauthorized - Please login again');
+            } else if (response.status === 403) {
+                throw new Error('Forbidden - Admin role required');
+            }
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
@@ -221,7 +483,7 @@ async function updateStudent(event) {
         showSuccess('Student updated successfully!');
     } catch (error) {
         console.error('Error updating student:', error);
-        alert('Failed to update student. Please try again.');
+        alert(`Failed to update student: ${error.message}`);
     }
 }
 
@@ -276,9 +538,15 @@ function showSuccess(message) {
     successDiv.textContent = message;
     
     const formSection = document.querySelector('.form-section');
-    formSection.insertBefore(successDiv, formSection.firstChild);
+    if (formSection) {
+        formSection.insertBefore(successDiv, formSection.firstChild);
+    }
     
-    setTimeout(() => successDiv.remove(), 3000);
+    setTimeout(() => {
+        if (successDiv.parentNode) {
+            successDiv.parentNode.removeChild(successDiv);
+        }
+    }, 3000);
 }
 
 function escapeHtml(unsafe) {
@@ -298,4 +566,5 @@ function formatDate(dateString) {
 // Test the connection on load
 console.log('🎯 Frontend loaded');
 console.log('🔗 API URL:', API_BASE_URL);
+console.log('🔐 Auth URL:', AUTH_BASE_URL);
 console.log('💡 Open browser Developer Tools (F12) to see detailed logs');
